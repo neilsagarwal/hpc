@@ -1131,7 +1131,7 @@ def _stir(kx, backup=0):
     for j in range(NUM_STIR_PASSES + backup):
         for i in range(256):
             s[0] = m_xor(s[0], m_add(m_xor(kx[i], kx[(i+83) & 255]), kx[s[0] & 255]))
-            # s[2] = m_add(s[2], kx[i]) # added fix for Wagner equivalent problem
+            s[2] = m_add(s[2], kx[i]) # fix for Wagner equivalent problem
             s[1] = m_add(s[0], s[1])
             s[3] = m_xor(s[3], s[2])
             s[5] = m_sub(s[5], s[4])
