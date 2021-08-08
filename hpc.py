@@ -251,7 +251,7 @@ def short_decrypt(s, kx, spice, blocksize, lmask=None):
 
 def tiny_encrypt(ptxt, kx, spice, blocksize):
     """ Encryption of Tiny Subciphers (0 <= blocksize < 36) """
-
+    global BACKUP
     s0 = ptxt[0]
     for cycle_num in range(1 + BACKUP):
         s0 = mask_lower(m_add(s0, cycle_num), blocksize)
@@ -287,7 +287,7 @@ def tiny_encrypt(ptxt, kx, spice, blocksize):
 
 def tiny_decrypt(ctxt, kx, spice, blocksize):
     """ Encryption of Tiny Subciphers (0 <= blocksize < 36) """
-
+    global BACKUP
     s0 = ctxt[0]
     for cycle_num in reversed(range(1 + BACKUP)):
         s0 = mask_lower(m_sub(s0, kx[blocksize+8]),blocksize)
@@ -326,6 +326,7 @@ def _PERM2I_TINY(N): return _PERM_TINY(N, 0x5c62e738d9a10fb4)
 
 def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
     assert (1 <= blocksize < 7)
+    global BACKUP
     tmp = []
     tmp.append(kx[16+2*blocksize])
     tmp[0] = m_add(tmp[0], cycle_num)
@@ -393,6 +394,7 @@ def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
 
 def tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num):
     assert (1 <= blocksize < 7)
+    global BACKUP
     tmp = []
     tmp.append(kx[16+2*blocksize])
     tmp[0] = m_add(tmp[0], cycle_num)
