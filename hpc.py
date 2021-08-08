@@ -61,6 +61,9 @@ Permbi = [
 # number of passes in stirring function
 NUM_STIR_PASSES = 3
 
+BACKUP = 0
+BACKUPSUBCIPHER = [0] * (1+5)
+
 # helper functions to ensure everything is % 64
 def mod(x): return x & 0xFFFFFFFFFFFFFFFF
 def m_xor(x, y): return mod(x ^ y)
@@ -83,7 +86,7 @@ def m_lrot(x, shift, size=64):
 def m_rrot(x, shift, size=64):
     return mask_lower(m_or(m_lsh(x, size - shift), m_rsh(x, shift)), size)
 
-def create_kx_table(key, sub_cipher_num, key_len, backup=0):
+def create_kx_table(key, sub_cipher_num, key_len):
     """
     Pseduorandomly derived by the key, the Key Expansion Table contains
     286 words of 64-bits. This table is "firewalled": knowing a KX table won't
@@ -123,7 +126,7 @@ def create_kx_table(key, sub_cipher_num, key_len, backup=0):
     for j in range(math.ceil(len(cleaned_key)/128)):
         for i in range(min(len(cleaned_key)-128*j, 128)):
             kx[i] = m_xor(kx[i], cleaned_key[i+j*128])
-        _stir(kx, backup)
+        stir(kx)
 
     # finish up key expansion
     for i in range(30):
@@ -1114,7 +1117,7 @@ def _stir_inverse_extended(s, i, mask, kx, spice):
     s[5] = m_xor(s[5], s[7])
     s[3] = m_sub(s[3], s[7])
 
-def _stir(kx, backup=0):
+def stir(kx):
     """
     The purpose of the Stirring function is to psuedo-randomize the kx array,
     allowing each bit to influence every other bit.
@@ -1128,7 +1131,7 @@ def _stir(kx, backup=0):
     for i in range(248, 256):
         s.append(kx[i])
 
-    for j in range(NUM_STIR_PASSES + backup):
+    for j in range(NUM_STIR_PASSES + BACKUP + BACKUPSUBCIPHER[0]):
         for i in range(256):
             s[0] = m_xor(s[0], m_add(m_xor(kx[i], kx[(i+83) & 255]), kx[s[0] & 255]))
             s[2] = m_add(s[2], kx[i]) # fix for Wagner equivalent problem
@@ -1260,7 +1263,7 @@ def decrypt(ctxt, kx, spice, blocksize, backup=0):
 def generate_hpc_functions(key, blocksize, key_length, backup):
     """ Generates encryption and decryption functions """
 
-    kx_table = create_kx_table(key, getSubCiphNum(blocksize).value, key_length, backup)
+    kx_table = create_kx_table(key, getSubCiphNum(blocksize).value, key_length)
     def encrypt_f(ptxt, spice):
         assert(get_blocksize_from_hex(ptxt) <= blocksize)
         return encrypt(ptxt, kx_table, spice, blocksize, backup)
