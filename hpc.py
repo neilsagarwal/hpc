@@ -1228,7 +1228,7 @@ def encrypt(ptxt, kx, spice, blocksize):
     temp_ptxt = ptxt
     if type(spice) != str: spice = hex(spice)
     spice = hex_str_to_arr(spice, 128)
-    if type(ptxt) != str: temp_ptxt = hex(ptxt)
+    if type(ptxt) != str: temp_ptxt = '0x' + hex(ptxt)[2:].zfill(math.ceil(blocksize/4))
     ptxt_arr = hex_str_to_arr(temp_ptxt)
     lmask = (1 << blocksize % 64) - 1
     args = (ptxt_arr, kx, spice, blocksize)
@@ -1265,7 +1265,7 @@ def decrypt(ctxt, kx, spice, blocksize):
     if type(spice) != str: spice = hex(spice)
     elif spice[0:2] != "0x": spice = hex(_string_to_hex(spice))
     spice = hex_str_to_arr(spice, 128)
-    if type(ctxt) != str: temp_ctxt = hex(ctxt)
+    if type(ctxt) != str: temp_ctxt = '0x' + hex(ctxt)[2:].zfill(math.ceil(blocksize/4))
     elif ctxt[0:2] != "0x": temp_ctxt = hex(_string_to_hex(ctxt))
     ctxt_arr = hex_str_to_arr(temp_ctxt)
     args = (ctxt_arr, kx, spice, blocksize)
