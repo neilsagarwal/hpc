@@ -15,8 +15,7 @@ Sample Usage:
 ```python
 from hpc import generate_hpc_functions
 
-blocksize = 10
-backup = 0
+blocksize = 125
 key_length = 128
 key = 0xf3aef8062681d980c14bd5915305f319
 
