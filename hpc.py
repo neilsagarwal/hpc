@@ -104,8 +104,6 @@ def create_kx_table(key, sub_cipher_num, key_len):
 
     assert(1 <= sub_cipher_num <= 5)
 
-    if (type(key) != str): key = hex(key)
-
     kx = [] # initialization of key expansion table
 
     # Initial set up of the key expansion of the table
@@ -120,7 +118,7 @@ def create_kx_table(key, sub_cipher_num, key_len):
             m_lsh(kx[i-3], 41)), kx[i-2]),kx[i-1]))
 
     # Clean up the key before incorporating
-    cleaned_key = hex_str_to_arr(key)
+    cleaned_key = int_to_arr(key, key_len)
 
     # Incorporating the content of the key into key expansion table
     for j in range(max(math.ceil(len(cleaned_key)/128), 1)):
@@ -133,27 +131,32 @@ def create_kx_table(key, sub_cipher_num, key_len):
         kx.append(kx[i])
     return kx
 
-def hex_str_to_arr(txt, required_len=None):
+def int_to_arr(txt, txt_size):
     """
     Convert hex string into an array of 64-bit words
-
+    
     Args:
-        txt: a hex string (atleast 0 bits)
+        txt: a int
+        txt_size: The bit length
     Returns:
         arr: input as list of 64-bit words
-
+    
     """
-    assert(txt[:2] == "0x")
-    txt = txt[2:]
-    if required_len:
-        assert(len(txt) == required_len)
     arr = []
-    for i in range(len(txt)//16):
-        arr.append(int("0x" + txt[i*16:(i+1)*16], 16))
-    if (len(txt) % 16 != 0):
-        arr.append(int("0x" + txt[(len(txt)//16)*16:], 16))
-
+    displacement = txt_size
+    while displacement >= 64:
+        displacement -= 64
+        arr.append(txt >> displacement)
+        txt &= (1 << displacement) - 1
+    if displacement > 0:
+        arr.append(txt)
     return arr
+
+def join_int_array(arr, lmask_size):
+    res = arr[-1]
+    for i in range(2, len(arr) + 1):
+        res += arr[-i] << (lmask_size + 64 * (i - 2))
+    return res
 
 def short_encrypt(s, kx, spice, blocksize, lmask=None):
     """ Encryption of Tiny Subciphers (37 <= blocksize < 65) """
@@ -198,7 +201,7 @@ def short_encrypt(s, kx, spice, blocksize, lmask=None):
             s0 = m_xor(s0, s0>>LBH) & lmask
 
         s0 = mask_lower(m_add(s0, kx[blocksize+8]),  blocksize)
-    return [s0]
+    return s0
 
 def short_decrypt(s, kx, spice, blocksize, lmask=None):
     """ Decryption of Tiny Subciphers (37 <= blocksize < 65) """
@@ -247,7 +250,7 @@ def short_decrypt(s, kx, spice, blocksize, lmask=None):
 
         s0 = mask_lower(m_sub(m_sub(s0, cycle_num), kx[blocksize]),  blocksize)
 
-    return [s0]
+    return s0
 
 def tiny_encrypt(ptxt, kx, spice, blocksize):
     """ Encryption of Tiny Subciphers (0 <= blocksize < 36) """
@@ -282,7 +285,7 @@ def tiny_encrypt(ptxt, kx, spice, blocksize):
                 s0 = tiny_16_35_encrypt(s0, temp, kx, blocksize)
 
         s0 = mask_lower(m_add(s0, kx[blocksize+8]),  blocksize)
-    return [s0]
+    return s0
 
 
 def tiny_decrypt(ctxt, kx, spice, blocksize):
@@ -316,7 +319,7 @@ def tiny_decrypt(ctxt, kx, spice, blocksize):
                 s0 = tiny_16_35_decrypt(s0, temp, kx, blocksize)
 
         s0 = mask_lower(m_sub(m_sub(s0, kx[blocksize]), cycle_num), blocksize)
-    return [s0]
+    return s0
 
 def _PERM_TINY(N, val): return val >> (mask_lower(N, 4) * 4)
 def _PERM1_TINY(N): return _PERM_TINY(N, 0x324f6a850d19e7cb)
@@ -610,8 +613,8 @@ def long_encrypt(s, kx, spice, blocksize, lmask=None):
         for i in range(len(s)-1):
             s[i] = m_add(s[i], kx[(blocksize&255)+8+i]) #change from spec
         s[-1] = m_add(s[-1], kx[(blocksize&255)+15])&lmask # change from spec
-
-    return s
+    lmask_size = lmask.bit_length()
+    return join_int_array(s, lmask_size)
 
 
 def long_decrypt(s, kx, spice, blocksize, lmask=None):
@@ -700,8 +703,8 @@ def long_decrypt(s, kx, spice, blocksize, lmask=None):
         for i in range(len(s)-1):
             s[i] = m_sub(s[i], kx[(blocksize&255)+i])
         s[-1] = m_sub(s[-1], kx[(blocksize&255)+7])&lmask
-
-    return s
+    lmask_size = lmask.bit_length()
+    return join_int_array(s, lmask_size)
 
 def medium_encrypt(ptxt, kx, spice, blocksize, lmask=None):
     """ Encryption of Medium Subciphers (64 < blocksize < 129) """
@@ -751,8 +754,8 @@ def medium_encrypt(ptxt, kx, spice, blocksize, lmask=None):
 
         ptxt[0] = m_add(s0, kx[blocksize+8])
         ptxt[1] = m_add(s1, kx[blocksize+9]) & lmask
-
-    return ptxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ptxt, lmask_size)
 
 """ Decryption of Medium Subciphers (64 < blocksize < 129) """
 def medium_decrypt(ctxt, kx, spice, blocksize, lmask=None):
@@ -846,11 +849,10 @@ def medium_decrypt(ctxt, kx, spice, blocksize, lmask=None):
             s0 = m_xor(s0, t)
             s1 = m_sub(s1, k) & lmask
             i -= 1
-
         ctxt[0] = m_sub(m_sub(s0, kx[blocksize]), cycle_num)
         ctxt[1] = m_sub(s1, kx[blocksize+1]) & lmask
-
-    return ctxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ctxt, lmask_size)
 
 SWIZ_POLY_NUMBERS = [0, 3, 7, 0xb, 0x13, 0x25, 0x43, 0x83, 0x11d, 0x211, 0x409,
      0x805, 0x1053, 0x201b, 0x402b, 0x8003, 0x1002d, 0x20009,
@@ -938,8 +940,8 @@ def extended_encrypt(ptxt, kx, spice, blocksize, lmask=None):
 
     for i in range(8):
         ptxt[i] = m_add(s[i], kx[(blocksize&255)+i+8])
-
-    return ptxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ptxt, lmask_size)
 
 def extended_decrypt(ctxt, kx, spice, blocksize, lmask=None):
     """ Decryption of Extended Subciphers (blocksize > 512) """
@@ -1025,8 +1027,8 @@ def extended_decrypt(ctxt, kx, spice, blocksize, lmask=None):
 
     for i in range(8):
         ctxt[i] = m_sub(s[i], kx[(blocksize&255)+i])
-
-    return ctxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ctxt, lmask_size)
 
 def _stir_extended(s, i, mask, kx, spice):
     t = s[0] & 255
@@ -1187,9 +1189,6 @@ def _display(kx):
     for i, k in enumerate(print_kx):
         print(hex(k), end='\t\n' if (i+1) % 8 == 0 else '\t')
 
-def hex_output(s):
-    return "0x" + "".join(["%016x" % x for x in s]) if s else None
-
 class SubCipher(Enum):
     tiny = 1
     short = 2
@@ -1224,12 +1223,8 @@ def encrypt(ptxt, kx, spice, blocksize):
         Encrypted plaintext
 
     """
-
-    temp_ptxt = ptxt
-    if type(spice) != str: spice = hex(spice)
-    spice = hex_str_to_arr(spice, 128)
-    if type(ptxt) != str: temp_ptxt = '0x' + hex(ptxt)[2:].zfill(math.ceil(blocksize/4))
-    ptxt_arr = hex_str_to_arr(temp_ptxt)
+    spice = int_to_arr(spice, 512)
+    ptxt_arr = int_to_arr(ptxt, blocksize)
     lmask = (1 << blocksize % 64) - 1
     args = (ptxt_arr, kx, spice, blocksize)
     if blocksize < 36:
@@ -1242,10 +1237,7 @@ def encrypt(ptxt, kx, spice, blocksize):
         s = long_encrypt(*args, lmask)
     else:
         s = extended_encrypt(*args, lmask)
-
-    hex_result = hex_output(s)
-    if type(ptxt) == str: return hex_result
-    return int(hex_result, 16)
+    return s
 
 def decrypt(ctxt, kx, spice, blocksize):
     """ Main decryption function
@@ -1260,14 +1252,8 @@ def decrypt(ctxt, kx, spice, blocksize):
             Decrypted ciphertext
 
         """
-
-    temp_ctxt = ctxt
-    if type(spice) != str: spice = hex(spice)
-    elif spice[0:2] != "0x": spice = hex(_string_to_hex(spice))
-    spice = hex_str_to_arr(spice, 128)
-    if type(ctxt) != str: temp_ctxt = '0x' + hex(ctxt)[2:].zfill(math.ceil(blocksize/4))
-    elif ctxt[0:2] != "0x": temp_ctxt = hex(_string_to_hex(ctxt))
-    ctxt_arr = hex_str_to_arr(temp_ctxt)
+    spice = int_to_arr(spice, 512)
+    ctxt_arr = int_to_arr(ctxt, blocksize)
     args = (ctxt_arr, kx, spice, blocksize)
     lmask = (1 << blocksize % 64) - 1
     if blocksize < 36:
@@ -1280,9 +1266,7 @@ def decrypt(ctxt, kx, spice, blocksize):
         s = long_decrypt(*args, lmask)
     else:
         s = extended_decrypt(*args, lmask)
-    hex_result = hex_output(s)
-    if type(ctxt) == str: return hex_result
-    return int(hex_result, 16)
+    return s
 
 def generate_hpc_functions(key, blocksize, key_length):
     """ Generates encryption and decryption functions """
