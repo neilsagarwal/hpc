@@ -123,7 +123,7 @@ def create_kx_table(key, sub_cipher_num, key_len):
     cleaned_key = hex_str_to_arr(key)
 
     # Incorporating the content of the key into key expansion table
-    for j in range(math.ceil(len(cleaned_key)/128)):
+    for j in range(max(math.ceil(len(cleaned_key)/128), 1)):
         for i in range(min(len(cleaned_key)-128*j, 128)):
             kx[i] = m_xor(kx[i], cleaned_key[i+j*128])
         stir(kx)
