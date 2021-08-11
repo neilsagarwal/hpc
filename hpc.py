@@ -269,7 +269,7 @@ def tiny_encrypt(ptxt, kx, spice, blocksize):
             temp[0] = m_add(temp[0], cycle_num)
             mem_BACKUP = BACKUP
             BACKUP = 0
-            temp = long_encrypt(temp, kx, spice_long, 512)
+            temp = int_to_arr(long_encrypt(temp, kx, spice, 512), 512)
             BACKUP = mem_BACKUP
             temp.append(temp[7])
             temp.append(temp[7])
@@ -304,7 +304,7 @@ def tiny_decrypt(ctxt, kx, spice, blocksize):
             temp[0] = m_add(temp[0], cycle_num)
             mem_BACKUP = BACKUP
             BACKUP = 0
-            temp = long_encrypt(temp, kx, spice_long, 512)
+            temp = int_to_arr(long_encrypt(temp, kx, spice, 512), 512)
             BACKUP = mem_BACKUP
             temp.append(temp[7])
             temp.append(temp[7])
@@ -337,7 +337,7 @@ def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
     if blocksize < 5:
         mem_BACKUP = BACKUP
         BACKUP = 0
-        tmp = medium_encrypt(tmp, kx, spice, 128)
+        tmp = int_to_arr(medium_encrypt(tmp, kx, spice, 128), 128)
         BACKUP = mem_BACKUP
         if blocksize == 1:
             N = tmp[1] << 64
@@ -405,7 +405,7 @@ def tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num):
     if blocksize < 5:
         mem_BACKUP = BACKUP
         BACKUP = 0
-        tmp = medium_encrypt(tmp, kx, spice, 128)
+        tmp = int_to_arr(medium_encrypt(tmp, kx, spice, 128), 128)
         BACKUP = mem_BACKUP
         m_val = (1 << blocksize*2) - 1
         if blocksize == 1:
