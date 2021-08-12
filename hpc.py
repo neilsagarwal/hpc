@@ -866,7 +866,7 @@ def extended_encrypt(ptxt, kx, spice, blocksize, lmask=None):
     if not lmask: lmask = (1 << 64) - 1
 
     LWD = int(math.ceil(blocksize/64))
-    QMSK = math.pow(2, math.ceil(math.log(LWD, 2))) - 1
+    QMSK = 2**(LWD-1).bit_length() - 1
     SWZ = 0
     for num in SWIZ_POLY_NUMBERS:
         if num > QMSK: SWZ = num; break
@@ -949,7 +949,7 @@ def extended_decrypt(ctxt, kx, spice, blocksize, lmask=None):
     if not lmask: lmask = (1 << 64) - 1
 
     LWD = int(math.ceil(blocksize/64))
-    QMSK = math.pow(2, math.ceil(math.log(LWD, 2))) - 1
+    QMSK = 2**(LWD-1).bit_length() - 1
     SWZ = 0
     for num in SWIZ_POLY_NUMBERS:
         if num > QMSK: SWZ = num; break
