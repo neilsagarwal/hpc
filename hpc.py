@@ -165,7 +165,7 @@ def short_encrypt(s, kx, spice, blocksize, lmask=None):
 
     s0 = s[0]
 
-    for cycle_num in range(1 + BACKUP):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[2]):
         s0 = m_add(m_add(s0, kx[blocksize]) & lmask, cycle_num) & lmask
         LBH = (blocksize+1)//2
         LBQ = (LBH+1)//2
@@ -215,7 +215,7 @@ def short_decrypt(s, kx, spice, blocksize, lmask=None):
 
     s0 = s[0]
 
-    for cycle_num in reversed(range(1 + BACKUP)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[2])):
 
         s0 = m_sub(s0, kx[blocksize+8]) & lmask
 
@@ -537,7 +537,7 @@ def long_encrypt(s, kx, spice, blocksize, lmask=None):
 
     if not lmask: lmask = (1 << 64) - 1
 
-    for cycle_num in range(BACKUP + 1):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[4]):
         for i in range(len(s)-1):
             s[i] = m_add(s[i], kx[(blocksize&255)+i])
         s[0] = m_add(s[0], cycle_num)
@@ -622,7 +622,7 @@ def long_decrypt(s, kx, spice, blocksize, lmask=None):
 
     if not lmask: lmask = (1 << 64) - 1
 
-    for cycle_num in reversed(range(BACKUP + 1)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[4])):
         for i in range(len(s)-1):
             s[i] = m_sub(s[i], kx[(blocksize&255)+8+i]) #change from spec
         s[-1] = m_sub(s[-1], kx[(blocksize&255)+15])&lmask # change from spec
@@ -711,7 +711,7 @@ def medium_encrypt(ptxt, kx, spice, blocksize, lmask=None):
 
     if lmask == 0 or lmask == None: lmask = (1 << 64) - 1
 
-    for cycle_num in range(BACKUP + 1):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[3]):
         s0 = m_add(m_add(ptxt[0], kx[blocksize]), cycle_num)
         s1 = m_add(ptxt[1], kx[blocksize+1]) & lmask
         for i in range(8):
@@ -761,7 +761,7 @@ def medium_encrypt(ptxt, kx, spice, blocksize, lmask=None):
 def medium_decrypt(ctxt, kx, spice, blocksize, lmask=None):
     if lmask == 0 or lmask == None: lmask = (1 << 64) - 1
 
-    for cycle_num in reversed(range(BACKUP + 1)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[3])):
         s0 = m_sub(ctxt[0], kx[blocksize+8])
         s1 = m_sub(ctxt[1], kx[blocksize+9]) & lmask
         i = 7
