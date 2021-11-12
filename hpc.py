@@ -61,6 +61,9 @@ Permbi = [
 # number of passes in stirring function
 NUM_STIR_PASSES = 3
 
+BACKUP = 0
+BACKUPSUBCIPHER = [0] * (1+5)
+
 # helper functions to ensure everything is % 64
 def mod(x): return x & 0xFFFFFFFFFFFFFFFF
 def m_xor(x, y): return mod(x ^ y)
@@ -83,7 +86,7 @@ def m_lrot(x, shift, size=64):
 def m_rrot(x, shift, size=64):
     return mask_lower(m_or(m_lsh(x, size - shift), m_rsh(x, shift)), size)
 
-def create_kx_table(key, sub_cipher_num, key_len, backup=0):
+def create_kx_table(key, sub_cipher_num, key_len):
     """
     Pseduorandomly derived by the key, the Key Expansion Table contains
     286 words of 64-bits. This table is "firewalled": knowing a KX table won't
@@ -101,8 +104,6 @@ def create_kx_table(key, sub_cipher_num, key_len, backup=0):
 
     assert(1 <= sub_cipher_num <= 5)
 
-    if (type(key) != str): key = hex(key)
-
     kx = [] # initialization of key expansion table
 
     # Initial set up of the key expansion of the table
@@ -117,49 +118,54 @@ def create_kx_table(key, sub_cipher_num, key_len, backup=0):
             m_lsh(kx[i-3], 41)), kx[i-2]),kx[i-1]))
 
     # Clean up the key before incorporating
-    cleaned_key = hex_str_to_arr(key)
+    cleaned_key = int_to_arr(key, key_len)
 
     # Incorporating the content of the key into key expansion table
-    for j in range(math.ceil(len(cleaned_key)/128)):
+    for j in range(max(math.ceil(len(cleaned_key)/128), 1)):
         for i in range(min(len(cleaned_key)-128*j, 128)):
             kx[i] = m_xor(kx[i], cleaned_key[i+j*128])
-        _stir(kx, backup)
+        stir(kx)
 
     # finish up key expansion
     for i in range(30):
         kx.append(kx[i])
     return kx
 
-def hex_str_to_arr(txt, required_len=None):
+def int_to_arr(txt, txt_size):
     """
     Convert hex string into an array of 64-bit words
-
+    
     Args:
-        txt: a hex string (atleast 0 bits)
+        txt: a int
+        txt_size: The bit length
     Returns:
         arr: input as list of 64-bit words
-
+    
     """
-    assert(txt[:2] == "0x")
-    txt = txt[2:]
-    if required_len:
-        assert(len(txt) == required_len)
     arr = []
-    for i in range(len(txt)//16):
-        arr.append(int("0x" + txt[i*16:(i+1)*16], 16))
-    if (len(txt) % 16 != 0):
-        arr.append(int("0x" + txt[(len(txt)//16)*16:], 16))
-
+    displacement = txt_size
+    while displacement >= 64:
+        displacement -= 64
+        arr.append(txt >> displacement)
+        txt &= (1 << displacement) - 1
+    if displacement > 0:
+        arr.append(txt)
     return arr
 
-def short_encrypt(s, kx, spice, blocksize, backup, lmask=None):
+def join_int_array(arr, lmask_size):
+    res = arr[-1]
+    for i in range(2, len(arr) + 1):
+        res += arr[-i] << (lmask_size + 64 * (i - 2))
+    return res
+
+def short_encrypt(s, kx, spice, blocksize, lmask=None):
     """ Encryption of Tiny Subciphers (37 <= blocksize < 65) """
 
     if not lmask: lmask = (1 << 64) - 1
 
     s0 = s[0]
 
-    for cycle_num in range(1 + backup):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[2]):
         s0 = m_add(m_add(s0, kx[blocksize]) & lmask, cycle_num) & lmask
         LBH = (blocksize+1)//2
         LBQ = (LBH+1)//2
@@ -195,9 +201,9 @@ def short_encrypt(s, kx, spice, blocksize, backup, lmask=None):
             s0 = m_xor(s0, s0>>LBH) & lmask
 
         s0 = mask_lower(m_add(s0, kx[blocksize+8]),  blocksize)
-    return [s0]
+    return s0
 
-def short_decrypt(s, kx, spice, blocksize, backup, lmask=None):
+def short_decrypt(s, kx, spice, blocksize, lmask=None):
     """ Decryption of Tiny Subciphers (37 <= blocksize < 65) """
 
     if not lmask: lmask = (1 << 64) - 1
@@ -209,7 +215,7 @@ def short_decrypt(s, kx, spice, blocksize, backup, lmask=None):
 
     s0 = s[0]
 
-    for cycle_num in reversed(range(1 + backup)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[2])):
 
         s0 = m_sub(s0, kx[blocksize+8]) & lmask
 
@@ -244,13 +250,13 @@ def short_decrypt(s, kx, spice, blocksize, backup, lmask=None):
 
         s0 = mask_lower(m_sub(m_sub(s0, cycle_num), kx[blocksize]),  blocksize)
 
-    return [s0]
+    return s0
 
-def tiny_encrypt(ptxt, kx, spice, blocksize, backup):
+def tiny_encrypt(ptxt, kx, spice, blocksize):
     """ Encryption of Tiny Subciphers (0 <= blocksize < 36) """
-
+    global BACKUP
     s0 = ptxt[0]
-    for cycle_num in range(1 + backup):
+    for cycle_num in range(1 + BACKUP):
         s0 = mask_lower(m_add(s0, cycle_num), blocksize)
         s0 = m_add(s0, kx[blocksize])
         if 1 <= blocksize < 7:
@@ -261,7 +267,10 @@ def tiny_encrypt(ptxt, kx, spice, blocksize, backup):
                 temp.append(m_xor(spice[i], kx[4 * blocksize + 16 + i]))
             spice_long = [0, 0, 0, 0, 0, 0, 0, 0]
             temp[0] = m_add(temp[0], cycle_num)
-            temp = long_encrypt(temp, kx, spice_long, 512, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            temp = int_to_arr(long_encrypt(temp, kx, spice, 512), 512)
+            BACKUP = mem_BACKUP
             temp.append(temp[7])
             temp.append(temp[7])
 
@@ -276,14 +285,14 @@ def tiny_encrypt(ptxt, kx, spice, blocksize, backup):
                 s0 = tiny_16_35_encrypt(s0, temp, kx, blocksize)
 
         s0 = mask_lower(m_add(s0, kx[blocksize+8]),  blocksize)
-    return [s0]
+    return s0
 
 
-def tiny_decrypt(ctxt, kx, spice, blocksize, backup):
+def tiny_decrypt(ctxt, kx, spice, blocksize):
     """ Encryption of Tiny Subciphers (0 <= blocksize < 36) """
-
+    global BACKUP
     s0 = ctxt[0]
-    for cycle_num in reversed(range(1 + backup)):
+    for cycle_num in reversed(range(1 + BACKUP)):
         s0 = mask_lower(m_sub(s0, kx[blocksize+8]),blocksize)
         if 1 <= blocksize < 7:
             s0 = tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num)
@@ -293,7 +302,10 @@ def tiny_decrypt(ctxt, kx, spice, blocksize, backup):
                 temp.append(m_xor(spice[i], kx[4 * blocksize + 16 + i]))
             spice_long = [0, 0, 0, 0, 0, 0, 0, 0]
             temp[0] = m_add(temp[0], cycle_num)
-            temp = long_encrypt(temp, kx, spice_long, 512, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            temp = int_to_arr(long_encrypt(temp, kx, spice, 512), 512)
+            BACKUP = mem_BACKUP
             temp.append(temp[7])
             temp.append(temp[7])
 
@@ -307,7 +319,7 @@ def tiny_decrypt(ctxt, kx, spice, blocksize, backup):
                 s0 = tiny_16_35_decrypt(s0, temp, kx, blocksize)
 
         s0 = mask_lower(m_sub(m_sub(s0, kx[blocksize]), cycle_num), blocksize)
-    return [s0]
+    return s0
 
 def _PERM_TINY(N, val): return val >> (mask_lower(N, 4) * 4)
 def _PERM1_TINY(N): return _PERM_TINY(N, 0x324f6a850d19e7cb)
@@ -317,12 +329,16 @@ def _PERM2I_TINY(N): return _PERM_TINY(N, 0x5c62e738d9a10fb4)
 
 def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
     assert (1 <= blocksize < 7)
+    global BACKUP
     tmp = []
     tmp.append(kx[16+2*blocksize])
     tmp[0] = m_add(tmp[0], cycle_num)
     tmp.append(kx[17+2*blocksize])
     if blocksize < 5:
-        tmp = medium_encrypt(tmp, kx, spice, 128, 0)
+        mem_BACKUP = BACKUP
+        BACKUP = 0
+        tmp = int_to_arr(medium_encrypt(tmp, kx, spice, 128), 128)
+        BACKUP = mem_BACKUP
         if blocksize == 1:
             N = tmp[1] << 64
             N += (tmp[0] + tmp[1]) & ((1 << 64) - 1)
@@ -354,9 +370,15 @@ def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
             tmp.append(kx[19+2*blocksize])
             tmp.append(kx[20+2*blocksize])
             tmp.append(kx[21+2*blocksize])
-            tmp = long_encrypt(tmp, kx, spice, 384, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            tmp = long_encrypt(tmp, kx, spice, 384)
+            BACKUP = mem_BACKUP
         else:
-            tmp = long_encrypt(tmp, kx, spice, 192, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            tmp = long_encrypt(tmp, kx, spice, 192)
+            BACKUP = mem_BACKUP
 
         for T in tmp:
             for i in range(7 - (1 if blocksize == 6 else 0)):
@@ -375,12 +397,16 @@ def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
 
 def tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num):
     assert (1 <= blocksize < 7)
+    global BACKUP
     tmp = []
     tmp.append(kx[16+2*blocksize])
     tmp[0] = m_add(tmp[0], cycle_num)
     tmp.append(kx[17+2*blocksize])
     if blocksize < 5:
-        tmp = medium_encrypt(tmp, kx, spice, 128, 0)
+        mem_BACKUP = BACKUP
+        BACKUP = 0
+        tmp = int_to_arr(medium_encrypt(tmp, kx, spice, 128), 128)
+        BACKUP = mem_BACKUP
         m_val = (1 << blocksize*2) - 1
         if blocksize == 1:
             N = tmp[1] << 64
@@ -413,9 +439,15 @@ def tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num):
             tmp.append(kx[19+2*blocksize])
             tmp.append(kx[20+2*blocksize])
             tmp.append(kx[21+2*blocksize])
-            tmp = long_encrypt(tmp, kx, spice, 384, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            tmp = long_encrypt(tmp, kx, spice, 384)
+            BACKUP = mem_BACKUP
         else:
-            tmp = long_encrypt(tmp, kx, spice, 192, 0)
+            mem_BACKUP = BACKUP
+            BACKUP = 0
+            tmp = long_encrypt(tmp, kx, spice, 192)
+            BACKUP = mem_BACKUP
         for T in tmp[::-1]:
             t = T
             for i in reversed(range(7 - (1 if blocksize == 6 else 0))):
@@ -500,12 +532,12 @@ def tiny_16_35_decrypt(s0, temp, kx, blocksize):
             s0 = mask_lower(m_sub(s0, T), blocksize)
     return s0
 
-def long_encrypt(s, kx, spice, blocksize, backup, lmask=None):
+def long_encrypt(s, kx, spice, blocksize, lmask=None):
     """ Encryption of Long Subciphers (128 < blocksize < 513) """
 
     if not lmask: lmask = (1 << 64) - 1
 
-    for cycle_num in range(backup + 1):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[4]):
         for i in range(len(s)-1):
             s[i] = m_add(s[i], kx[(blocksize&255)+i])
         s[0] = m_add(s[0], cycle_num)
@@ -581,16 +613,16 @@ def long_encrypt(s, kx, spice, blocksize, backup, lmask=None):
         for i in range(len(s)-1):
             s[i] = m_add(s[i], kx[(blocksize&255)+8+i]) #change from spec
         s[-1] = m_add(s[-1], kx[(blocksize&255)+15])&lmask # change from spec
+    lmask_size = lmask.bit_length()
+    return join_int_array(s, lmask_size)
 
-    return s
 
-
-def long_decrypt(s, kx, spice, blocksize, backup, lmask=None):
+def long_decrypt(s, kx, spice, blocksize, lmask=None):
     """ Decryption of Long Subciphers (128 < blocksize < 513) """
 
     if not lmask: lmask = (1 << 64) - 1
 
-    for cycle_num in reversed(range(backup + 1)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[4])):
         for i in range(len(s)-1):
             s[i] = m_sub(s[i], kx[(blocksize&255)+8+i]) #change from spec
         s[-1] = m_sub(s[-1], kx[(blocksize&255)+15])&lmask # change from spec
@@ -671,15 +703,15 @@ def long_decrypt(s, kx, spice, blocksize, backup, lmask=None):
         for i in range(len(s)-1):
             s[i] = m_sub(s[i], kx[(blocksize&255)+i])
         s[-1] = m_sub(s[-1], kx[(blocksize&255)+7])&lmask
+    lmask_size = lmask.bit_length()
+    return join_int_array(s, lmask_size)
 
-    return s
-
-def medium_encrypt(ptxt, kx, spice, blocksize, backup, lmask=None):
+def medium_encrypt(ptxt, kx, spice, blocksize, lmask=None):
     """ Encryption of Medium Subciphers (64 < blocksize < 129) """
 
     if lmask == 0 or lmask == None: lmask = (1 << 64) - 1
 
-    for cycle_num in range(backup + 1):
+    for cycle_num in range(1 + BACKUP + BACKUPSUBCIPHER[3]):
         s0 = m_add(m_add(ptxt[0], kx[blocksize]), cycle_num)
         s1 = m_add(ptxt[1], kx[blocksize+1]) & lmask
         for i in range(8):
@@ -722,14 +754,14 @@ def medium_encrypt(ptxt, kx, spice, blocksize, backup, lmask=None):
 
         ptxt[0] = m_add(s0, kx[blocksize+8])
         ptxt[1] = m_add(s1, kx[blocksize+9]) & lmask
-
-    return ptxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ptxt, lmask_size)
 
 """ Decryption of Medium Subciphers (64 < blocksize < 129) """
-def medium_decrypt(ctxt, kx, spice, blocksize, backup, lmask=None):
+def medium_decrypt(ctxt, kx, spice, blocksize, lmask=None):
     if lmask == 0 or lmask == None: lmask = (1 << 64) - 1
 
-    for cycle_num in reversed(range(backup + 1)):
+    for cycle_num in reversed(range(1 + BACKUP + BACKUPSUBCIPHER[3])):
         s0 = m_sub(ctxt[0], kx[blocksize+8])
         s1 = m_sub(ctxt[1], kx[blocksize+9]) & lmask
         i = 7
@@ -817,11 +849,10 @@ def medium_decrypt(ctxt, kx, spice, blocksize, backup, lmask=None):
             s0 = m_xor(s0, t)
             s1 = m_sub(s1, k) & lmask
             i -= 1
-
         ctxt[0] = m_sub(m_sub(s0, kx[blocksize]), cycle_num)
         ctxt[1] = m_sub(s1, kx[blocksize+1]) & lmask
-
-    return ctxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ctxt, lmask_size)
 
 SWIZ_POLY_NUMBERS = [0, 3, 7, 0xb, 0x13, 0x25, 0x43, 0x83, 0x11d, 0x211, 0x409,
      0x805, 0x1053, 0x201b, 0x402b, 0x8003, 0x1002d, 0x20009,
@@ -829,13 +860,13 @@ SWIZ_POLY_NUMBERS = [0, 3, 7, 0xb, 0x13, 0x25, 0x43, 0x83, 0x11d, 0x211, 0x409,
      0x100001b, 0x2000009, 0x4000047, 0x8000027, 0x10000009,
      0x20000005, 0x40000053, 0x80000009]
 
-def extended_encrypt(ptxt, kx, spice, blocksize, backup, lmask=None):
+def extended_encrypt(ptxt, kx, spice, blocksize, lmask=None):
     """ Encryption of Extended Subciphers (blocksize > 512) """
 
     if not lmask: lmask = (1 << 64) - 1
 
     LWD = int(math.ceil(blocksize/64))
-    QMSK = math.pow(2, math.ceil(math.log(LWD, 2))) - 1
+    QMSK = 2**(LWD-1).bit_length() - 1
     SWZ = 0
     for num in SWIZ_POLY_NUMBERS:
         if num > QMSK: SWZ = num; break
@@ -909,16 +940,16 @@ def extended_encrypt(ptxt, kx, spice, blocksize, backup, lmask=None):
 
     for i in range(8):
         ptxt[i] = m_add(s[i], kx[(blocksize&255)+i+8])
+    lmask_size = lmask.bit_length()
+    return join_int_array(ptxt, lmask_size)
 
-    return ptxt
-
-def extended_decrypt(ctxt, kx, spice, blocksize, backup, lmask=None):
+def extended_decrypt(ctxt, kx, spice, blocksize, lmask=None):
     """ Decryption of Extended Subciphers (blocksize > 512) """
 
     if not lmask: lmask = (1 << 64) - 1
 
     LWD = int(math.ceil(blocksize/64))
-    QMSK = math.pow(2, math.ceil(math.log(LWD, 2))) - 1
+    QMSK = 2**(LWD-1).bit_length() - 1
     SWZ = 0
     for num in SWIZ_POLY_NUMBERS:
         if num > QMSK: SWZ = num; break
@@ -996,8 +1027,8 @@ def extended_decrypt(ctxt, kx, spice, blocksize, backup, lmask=None):
 
     for i in range(8):
         ctxt[i] = m_sub(s[i], kx[(blocksize&255)+i])
-
-    return ctxt
+    lmask_size = lmask.bit_length()
+    return join_int_array(ctxt, lmask_size)
 
 def _stir_extended(s, i, mask, kx, spice):
     t = s[0] & 255
@@ -1114,7 +1145,7 @@ def _stir_inverse_extended(s, i, mask, kx, spice):
     s[5] = m_xor(s[5], s[7])
     s[3] = m_sub(s[3], s[7])
 
-def _stir(kx, backup=0):
+def stir(kx):
     """
     The purpose of the Stirring function is to psuedo-randomize the kx array,
     allowing each bit to influence every other bit.
@@ -1128,7 +1159,7 @@ def _stir(kx, backup=0):
     for i in range(248, 256):
         s.append(kx[i])
 
-    for j in range(NUM_STIR_PASSES + backup):
+    for j in range(NUM_STIR_PASSES + BACKUP + BACKUPSUBCIPHER[0]):
         for i in range(256):
             s[0] = m_xor(s[0], m_add(m_xor(kx[i], kx[(i+83) & 255]), kx[s[0] & 255]))
             s[2] = m_add(s[2], kx[i]) # fix for Wagner equivalent problem
@@ -1158,9 +1189,6 @@ def _display(kx):
     for i, k in enumerate(print_kx):
         print(hex(k), end='\t\n' if (i+1) % 8 == 0 else '\t')
 
-def hex_output(s):
-    return "0x" + "".join(["%016x" % x for x in s]) if s else None
-
 class SubCipher(Enum):
     tiny = 1
     short = 2
@@ -1182,7 +1210,7 @@ def getSubCiphNum(blocksize):
     else:
         return SubCipher.extended
 
-def encrypt(ptxt, kx, spice, blocksize, backup=0):
+def encrypt(ptxt, kx, spice, blocksize):
     """ Main encryption function
 
     Args:
@@ -1190,20 +1218,15 @@ def encrypt(ptxt, kx, spice, blocksize, backup=0):
         kx: key expansion table
         spice: spice
         blocksize: size of block
-        backup: value for backup
 
     Returns:
         Encrypted plaintext
 
     """
-
-    temp_ptxt = ptxt
-    if type(spice) != str: spice = hex(spice)
-    spice = hex_str_to_arr(spice, 128)
-    if type(ptxt) != str: temp_ptxt = hex(ptxt)
-    ptxt_arr = hex_str_to_arr(temp_ptxt)
+    spice = int_to_arr(spice, 512)
+    ptxt_arr = int_to_arr(ptxt, blocksize)
     lmask = (1 << blocksize % 64) - 1
-    args = (ptxt_arr, kx, spice, blocksize, backup)
+    args = (ptxt_arr, kx, spice, blocksize)
     if blocksize < 36:
         s = tiny_encrypt(*args)
     elif blocksize < 65:
@@ -1214,12 +1237,9 @@ def encrypt(ptxt, kx, spice, blocksize, backup=0):
         s = long_encrypt(*args, lmask)
     else:
         s = extended_encrypt(*args, lmask)
+    return s
 
-    hex_result = hex_output(s)
-    if type(ptxt) == str: return hex_result
-    return int(hex_result, 16)
-
-def decrypt(ctxt, kx, spice, blocksize, backup=0):
+def decrypt(ctxt, kx, spice, blocksize):
     """ Main decryption function
 
         Args:
@@ -1227,21 +1247,14 @@ def decrypt(ctxt, kx, spice, blocksize, backup=0):
             kx: key expansion table
             spice: spice
             blocksize: size of block
-            backup: value for backup
 
         Returns:
             Decrypted ciphertext
 
         """
-
-    temp_ctxt = ctxt
-    if type(spice) != str: spice = hex(spice)
-    elif spice[0:2] != "0x": spice = hex(_string_to_hex(spice))
-    spice = hex_str_to_arr(spice, 128)
-    if type(ctxt) != str: temp_ctxt = hex(ctxt)
-    elif ctxt[0:2] != "0x": temp_ctxt = hex(_string_to_hex(ctxt))
-    ctxt_arr = hex_str_to_arr(temp_ctxt)
-    args = (ctxt_arr, kx, spice, blocksize, backup)
+    spice = int_to_arr(spice, 512)
+    ctxt_arr = int_to_arr(ctxt, blocksize)
+    args = (ctxt_arr, kx, spice, blocksize)
     lmask = (1 << blocksize % 64) - 1
     if blocksize < 36:
         s = tiny_decrypt(*args)
@@ -1253,20 +1266,18 @@ def decrypt(ctxt, kx, spice, blocksize, backup=0):
         s = long_decrypt(*args, lmask)
     else:
         s = extended_decrypt(*args, lmask)
-    hex_result = hex_output(s)
-    if type(ctxt) == str: return hex_result
-    return int(hex_result, 16)
+    return s
 
-def generate_hpc_functions(key, blocksize, key_length, backup):
+def generate_hpc_functions(key, blocksize, key_length):
     """ Generates encryption and decryption functions """
 
-    kx_table = create_kx_table(key, getSubCiphNum(blocksize).value, key_length, backup)
+    kx_table = create_kx_table(key, getSubCiphNum(blocksize).value, key_length)
     def encrypt_f(ptxt, spice):
         assert(get_blocksize_from_hex(ptxt) <= blocksize)
-        return encrypt(ptxt, kx_table, spice, blocksize, backup)
+        return encrypt(ptxt, kx_table, spice, blocksize)
     def decrypt_f(ctxt, spice):
         assert(get_blocksize_from_hex(ctxt) <= blocksize)
-        return decrypt(ctxt, kx_table, spice, blocksize, backup)
+        return decrypt(ctxt, kx_table, spice, blocksize)
     return encrypt_f, decrypt_f
 
 def get_blocksize_from_hex(hex_val):
