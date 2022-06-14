@@ -336,9 +336,9 @@ def tiny_1_6_encrypt(s0, kx, spice, blocksize, cycle_num):
         elif blocksize <= 3:
             for word in tmp:
                 for i in range(math.ceil(32/blocksize)):
-                    s0 = mask_lower(s0 ^ (word & ((1 << blocksize)-1)), blocksize)
-                    word >>= blocksize
                     s0 = mask_lower(s0 + (word & ((1 << blocksize)-1)), blocksize)
+                    word >>= blocksize
+                    s0 = mask_lower(s0 ^ (word & ((1 << blocksize)-1)), blocksize)
                     s0 = m_lrot(s0, 1, blocksize)
                     word >>= blocksize
         else:
@@ -404,9 +404,9 @@ def tiny_1_6_decrypt(s0, kx, spice, blocksize, cycle_num):
                 for i in reversed(range(math.ceil(32/blocksize))):
                     t_word = (word & (m_val << (i * blocksize * 2))) >> (i * blocksize * 2)
                     s0 = _PERM2I_TINY(s0)
-                    s0 -= (t_word >> blocksize)
+                    s0 ^= (t_word >> blocksize)
                     s0 = _PERM1I_TINY(s0)
-                    s0 ^= (t_word & ((1 << blocksize)-1))
+                    s0 -= (t_word & ((1 << blocksize)-1))
     else:
         tmp.append(kx[18+2*blocksize])
         if blocksize == 6:
